@@ -1,0 +1,140 @@
+这个博客写了planning模块的分析  https://blog.csdn.net/davidhopper/article/details/79176505
+今天对比了这个博客分析一下代码
+下一步准备对比这个博客做一下感知的模块分析
+
+这个博客注明了禁止转载
+
+不知道这个博客分析的代码是哪个版本的  我分析的时候对比的是  版本的  后面发现博客是分析2.0版本的我也就按照2.0版本的进行分析
+
+带着问题做任务  希望结束后能够回答一下问题
+1.planning模块的作用是什么  文字概括
+2.plannning模块接受了哪些数据  从哪里接受的  数据流程是什么样的  画出流程图 
+3.模块有哪些类 类之间有什么关系
+ 有哪些数据成员 数据怎么流通
+ 有哪些方法成员 方法的作用是什么
+ 
+ 
+ 接下来开始看 
+ 遇到了第一个问题   程序入口问题 ：planning的模块入口是 
+	该模块的主入口为：modules/planning/main.cc：   APOLLO_MAIN(apollo::planning::Planning)
+	那么问题来了    ：ros是怎么运作的   Apollo是怎么进入这个入口的
+	
+查看ros的介绍视频    学习构建一个ros例子
+	视频太慢了   B站 重德智能视频  这个视频和文档向配套   
+	找一篇文章  ros教程 https://www.ncnynl.com/archives/201608/496.html
+	在这个过程中 发现了一个有意思的文章讨论ros到底适用于什么问题 ROS反对派：一个来自芬兰叫普鲁机器人的公司https://blog.csdn.net/uunubt/article/details/81168557
+	打开ubuntu安装ros的过程中 风扇一直响  然后就在软件更新 附加驱动 安装了显卡驱动 系统崩溃
+	然后重新安装系统  
+	配置系统ubuntu 
+		安装搜狗拼音 Ubuntu 16.04 LTS安装sogou输入法详解https://blog.csdn.net/qq_21792169/article/details/53152700
+		安装googele
+		设置清华软件源
+		安装visual studio code    https://blog.csdn.net/tap880507/article/details/80563772
+		安装蓝灯
+		安装chrome
+		安装ros
+		安装docker  清华云 
+		安装Apollo
+	配置系统windows 平时用windows 下的软件看代码 vscode
+		https://www.jianshu.com/p/a0ae073e973b  配置vscode
+模块入口  初步认为可能是通过launch文件 通过ros启动调用的   具体机制再看
+	搜launch 会发现scripts下的.sh 中都会有些.launch 命令  .launch 文件是ros的原生节点启动的文件。初步怀疑  .sh 文件可能会在dreamview中操作时会被调用。然后.sh 执行脚本 启动.launch
+planning.h 中  定义了apollo::planning::Planning  它继承于public apollo::common::ApolloApp
+Planning() = default;C++11 标准引入了一个新特性：defaulted 函数。程序员只需在函数声明后加上“=default;”，就可将该函数声明为 defaulted 函数，编译器将为显式声明的 defaulted 函数自动生成函数体。例如：
+virtual ~Planning();//定义了planning为虚函数   虚函数用处   为了允许用基类的指针来调用子类的这个函数 http://www.runoob.com/w3cnote/cpp-virtual-functions.html   
+std::string Name() const override;  constoverride    std::string Name() const override;  //override 应该是为了防止虚函数 调用子类 重新定义 引起的程序错误
+
+APOLLO_MAIN 定义在apollo_app.h  它接收一个app参数，，planning模块中接受的是apollo::planning::Planning  然后APOLLO_MAIN 中执行了一系列操作
+包括：
+	始化Google日志工具，
+	使用Google命令行解析工具解析相关参数，
+	注册接收中止信号“SIGINT”的处理函数：apollo::common::apollo_app_sigint_handler（该函数的功能十分简单，就是收到中止信号“SIGINT”后，调用ros::shutdown()关闭ROS），
+	创建apollo::planning::Planning对象：apollo_app_，
+	初始化ROS环境，
+	调用apollo_app_.Spin()函数开始消息处理循环。
+上一段操作内容是博客中写的 跟代码基本是一行一行相对应的
+接下来初始化日志工具和命令行解析暂时不管 先查看注册处理函数  查看了C++的注册回调的用法  按照博客说法 signal	signal(SIGINT, apollo::common::apollo_app_sigint_handler); 应该是注册函数  ，那么注册函数的定义的位置应该有说明接收的函数作为参数的函数类型,可是这里并没有，不太明白这个注册函数。   1206：注册函数和回调函数是C++的特性  用来实现异步加回调的程序模式
+
+接下来查看初始化ros环境  这一步骤都干了什么事情  
+发现ros：：init不能跳转  从中科院软件研究所的ros教程中可以看到  rosinit是roscpp的函数  作用是解析传入的ROS参数，创建node第一步需要用到的函数 也可以把roscpp就当作为一个C++的库
+
+博客中在分析spin之前有一个类图 和一个时序图  其中时序图的start不太理解
+
+接下来查看调用apollo_app_.Spin()函数开始消息处理循环   ros：：spin（）用于触发topic、service的响应队列 猜测Apollospin具有相同或类似的功能 
+ApolloApp::Spin()  定义在apollo_app.cc  这是一个模板  在实例化的时候会根据对应的模块重写相关方法等成员
+接下来讨论spin（）函数的内部实现
+std::unique_ptr<ros::AsyncSpinner> spinner;//智能指针关键字 + 指向的类型 +指针名称  而且unique类的智能指针 避免使用另一个指针剥夺当前指针的指向所有权。primer P672
+
+那么ros::AsyncSpinner是什么类型？ 是ros的一个多线程消息订阅用法  这一段的意思是说如果回调进程的数目大于1 那么就用AsyncSpinner这种多线程的消息订阅方法
+
+接下来看ros的节点信息方法还是继续？ros的节点消息待定  
+还是对照博客程序运行图看代码把！
+
+发现代码中的部分头文件包含出错  尝试在code中编译 这个博客写了详细步骤https://www.cnblogs.com/fuhang/p/8778190.html  github也有howto 文档
+	编译之前要安装bocker 并且设置用户组 create the docker group and add your user:https://docs.docker.com/install/linux/linux-postinstall/#manage-docker-as-a-non-root-user
+	之后docker中运行了dreamview后在chrome中打开http://localhost:8888/ 打开  之后根据博客进行调试运行  我这次在code中build成功 但是运行后8888还是打不开 又碰到了以前的情况
+
+接下来继续看博客   ApolloApp::Spin()函数内部，首先创建ros::AsyncSpinner对象spinner，监控用户操作。之后调用虚函数：Init()（实际调用apollo::planning::Planning::Init()）执行初始化。
+转入planning模块的init（） apollo::planning::Planning::Init()函数内部，
+	首先获取高精地图指针，
+	之后执行适配器管理者（AdapterManager）对象的初始化状态，
+	接着检查AdapterManager里定位适配器（AdapterManager::GetLocalization()）、
+		底盘适配器（AdapterManager::GetChassis()）、
+		路由寻径响应适配器（AdapterManager::GetRoutingResponse()）、
+		路由寻径请求适配器（AdapterManager::GetRoutingRequest()）的初始化状态，
+		若启用预测（FLAGS_enable_prediction）则继续检查预测适配器（AdapterManager::GetPrediction()）的初始化状态，
+		若启用交通信号灯（FLAGS_enable_traffic_light）则继续检查交通信号灯适配器（AdapterManager::GetTrafficLightDetection()）的初始化状态。
+	接下来，执行参考线提供者（所谓参考线就是一条候选路径）的初始化。
+	此后调用Planning::RegisterPlanners()将RTKReplayPlanner、EMPlanner对象的创建函数注册到计划者工厂类对象planner_factory_中。
+	另外通过读取配置文件中给定的计划者类型，使用planner_factory_.CreateObject(config_.planner_type())动态生成所需的计划者对象（查询配置文件得知，实际生成EMPlanner对象）。
+	最后执行计划者对象的初始化：planner_->Init(config_)。
+	以上段是博客内容  感觉 博客内容和3.0内容有一些出入  但是也有部分是相同的  通过对比发现 博客的分析是基于2.0版本的
+
+现在重新回到ApolloApp::Spin()函数的分析。初始化完成后继续调用虚函数：Start()（实际调用apollo::planning::Planning::Start()）开始运行；之后使用spinner来监听各种信号，并调用相关处理函数；最后，在收到ros::waitForShutdown()信号后，调用Stop()（实际调用apollo::planning::Planning::Stop()）完成资源清理退出。调试信息的输出贯穿于整个函数过程。
+--------------------- 
+作者：知行合一2018 
+来源：CSDN 
+原文：https://blog.csdn.net/davidhopper/article/details/79176505 
+版权声明：本文为博主原创文章，转载请附上博文链接！
+
+
+接下来有两个任务  一个是理解adaptermanager  它	不属于规划模块，但它是所有消息适配器的管理者   一个是对planning模块内的各个方法成员及数据成员的理解。这里我先考虑深入planning模块的内容部部分
+
+规划类（Planning）分析    Planning类是规划模块的主要类，它将GPS和IMU提供的信息作为输入，处理后生成规划信息（包括路径和速度信息），提供给控制模块使用。 
+期望最大规划者类（EMPlanner）分析   EMPlanner类是具体的规划实施类，它基于高精地图、导航路径及障碍物信息作出实际的驾驶决策，包括路径、速度等方面。
+帧类（Frame）分析    Frame类用于存储规划模块用到的各类信息，包括起始点、车辆状态、参考线信息列表（即多条候选路径）、驾驶参考线信息（即实际执行的驾驶路径）、障碍物预测等
+参考线提供者类（ReferenceLineProvider）分析      规划模块中参考线（即候选路径）的提供和管理者，它以Routing模块输出的高精度路径（从起点到终点的Lane片段集）为输入数据，经优化处理后生成平滑的参考线集给后续的动作规划子模块使用。
+参考线信息类（ReferenceLineInfo）分析      存储参考线信息。所谓参考线实际就是一条驾驶路径，因此参考线信息实际上就是一条驾驶路径所需的各种信息，包括车辆状态、当前轨迹点、路径数据、速度数据等。
+交通决策器类（TrafficDecider）分析	
+路径决策器类（PathDecider）分析
+速度决策器类（SpeedDecider）分析
+动态规划多项式路径优化器类（DpPolyPathOptimizer）分析
+动态规划ST坐标速度优化器类（DpStSpeedOptimizer）分析
+二次规划样条路径优化器类（QpSplinePathOptimizer）分析
+二次规划样条ST坐标速度优化器类（QpSplineStSpeedOptimizer）分析
+
+
+planning规划类分析
+	Init函数 该函数完成以下工作：获取高精地图；读取配置文件获取相关参数；使用适配器管理者（apollo::common::adapterAdapterManager，Apollo项目内的所有模块如定位、底盘、预测、控制、规划等全部归其管理，类似于一个家庭管家）对象获取规划模块所需的定位、底盘、路径、交通信号灯探测、周边障碍物预测等信息；获取参考线（基于导航路径和当前位置计算得到，提供给Planning类决策的候选轨迹线）；注册具体的规划者类（目前注册RTKReplayPlanner及EMPlanner）；使用工厂创建模式生成具体的规划者类对象（通过查询配置文件获知，实际生成了EMPlanner类对象）；最后完成规划者类对象的初始化。
+2. 	Start函数 Start函数很简单，主要完成两个工作：
+		一是启动参考线信息的获取；
+		二是创建一个定时器，按给定间隔调用Planning::OnTimer函数，Planning::OnTimer函数的功能更为简单，即调用Planning::RunOnce完成实际的规划工作。
+3. 	Stop函数 Stop函数的功能也很简单：一是结束参考线信息的获取；二是清空可发布轨迹类对象指针、帧类对象指针、规划者类对象指针。
+4. 	RunOnce函数 现在来观察RunOnce函数完成的具体工作。
+		该函数首先调用AdapterManager类的相关函数来获取规划所需的所需的定位、底盘信息；
+		接着基于上述信息，调用common::VehicleStateProvider::instance()->Update函数更新车辆自身的状态；
+		之后调用Planning::InitFrame函数初始化规划帧；
+		如果一切正常，就调用Planning::Plan函数执行实际的规划；planning.cc 291行
+		最后调用Planning::PublishPlanningPb函数将计算出的规划路径发布给控制模块。
+		另外，整个函数针对各种可能出现的错误均做出相应处理。
+5. 	InitFrame函数 该函数功能比较简单，首先调用Frame::reset函数重新创建一个Frame类对象（如果之前不存在，直接创建；若已经存在一个，则先删除后创建），然后设置预测信息，最后调用Frame::Init函数完成当前帧的初始化。 
+
+	Plan函数是规划模块最核心的函数，用来完成实际的路径规划。  status = Plan(start_timestamp, stitching_trajectory, trajectory_pb)
+		该函数针对Frame类对象指针frame_提供的多条候选参考线信息：reference_line_info，调用规划者对象的Plan函数（planner_->Plan，当前实现就是调用EMPlanner::Plan函数）决策得到可用参考线信息集（可能不止一条）；planner_ = planner_factory_.CreateObject(config_.planner_type());/工厂模式创建的指针
+		接着调用Frame::FindDriveReferenceLineInfo函数从可用参考线信息集获取最优的参考线信息：best_reference_line；
+		最后调用ReferenceLineInfo::ExportDecision函数，将best_reference_line转化可供控制模块使用的驾驶决策，包括：路径、速度等。
+-
+		
+任务  
+	1、如何理解planner_ = planner_factory_.CreateObject(config_.planner_type());/  工厂模式
+	2、

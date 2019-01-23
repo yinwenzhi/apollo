@@ -1,0 +1,31 @@
+查看代码并写注释 在硬盘上  编译运行的代码都存储到系统盘
+知乎配置教程https://zhuanlan.zhihu.com/p/51160743 
+rosrun rqt-graph rqt-graph 显示节点图
+
+配置系统ubuntu 
+	安装搜狗拼音 Ubuntu 16.04 LTS安装sogou输入法详解https://blog.csdn.net/qq_21792169/article/details/53152700
+	安装googele
+	设置清华软件源
+	安装visual studio code    https://blog.csdn.net/tap880507/article/details/80563772
+	安装蓝灯
+	安装chrome
+	安装ros
+	安装docker  清华云 
+	安装Apollo
+		下载github代码
+
+		百度官方给的命令不对 用这个命令才能运行bash scripts/dreamview.sh docker运行dreamview
+	配置系统windows 平时用windows 下的软件看代码 vscode
+		https://www.jianshu.com/p/a0ae073e973b  配置vscode
+	
+	
+
+
+
+
+编译2.0
+	长时间显示Building: no action running 删除镜像 重新编译就可以了
+启动dreamview不成功
+	在2.3下运行bash botstrap.sh 显示可以在8888看到 但是打开8888并看不到  然后ps -e发现dreamview 没有启动 然后bash dreamview。sh手动启动 后查看ps -e就可以了
+
+

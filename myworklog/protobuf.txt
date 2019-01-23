@@ -1,0 +1,7 @@
+https://blog.csdn.net/ycy_dy/article/details/81023257  详解proto
+
+https://blog.csdn.net/ycy_dy/article/details/81023257 怎么用proto
+
+https://blog.csdn.net/u012423865/article/details/80529114 怎么再apollo中新建一个消息
+增加proto文件、编译生成消息类、增加相关的依赖、增加头文件、增加消息别名。
+

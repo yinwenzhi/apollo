@@ -1,0 +1,226 @@
+
+适配器管理者类（AdapterManager）分析 它是所有消息适配器的管理者， AdapterManager是所有适配器的管理容器
+什么是适配器，Apollo项目为什么要使用适配器？
+第一个问题很好理解，借用网上经常提到的一个例子，中国电压标准是220V，美国电压标准是110V，中国电器要在美国使用，必须借助一个变压器，这个变压器就是适配器。另
+外一个例子是，中国插座标准是扁孔，欧洲插座标准是圆孔，中国的电源插头到欧洲使用，必须借助一个插孔转接器，这个转接器也是适配器。
+以上只是对适配器的形象描述，C++中用到的适配器，自然是来自于鼎鼎有名的GOF名著《Design Patterns: Elements of Reusable Object-Oriented Software》中提到的Adapter设计模式。
+关于该模式的描述，网上有一堆文章，此处不再赘述。
+关于第二个问题，Apollo项目各模块内部的消息传递使用Google Protocol Buffer格式，各模块之间的底层消息传递目前使用ROS机制，今后可能会替换为百度自研消息机制。
+不管Apollo项目各模块之间的底层消息传递机制如何改变，我们必须确保各模块内部的消息格式不变，即使用Google Protocol Buffer格式，否则会因为底层消息传递机制的修改，导致各模块内部涉及消息处理的代码被迫修改，这既严重破坏各模块代码的独立性和正确性，也严重影响项目开发效率。
+这就是Apollo创建众多Adapter及其管理者AdapterManager的根本原因。 
+--------------------- 
+作者：知行合一2018 
+来源：CSDN 
+原文：https://blog.csdn.net/davidhopper/article/details/79176505 
+版权声明：本文为博主原创文章，转载请附上博文链接！
+
+
+modules--common--adapters---message_adapters.h列出了Apollo 2.0版本目前定义了以下适配器：
+	Adapter为一个类 它继承于AdapterBase
+（一）数据成员
+
+	AdapterManager类的数据成员除了包含上述各个适配器对象及其关联的消息发布、订阅对象外，还有如下重要成员：
+	1. ROS节点句柄（std::unique_ptr<ros::NodeHandle> node_handle_）
+	内置的ROS节点句柄。
+	2. 观测回调函数数组（std::vector<std::function<void()>> observers_）
+	各个适配器提供的回调函数数组。
+	3. 初始化标志（bool initialized_）
+	记录该类是否完成初始化。
+	
+（二）重要成员函数
+
+    Init函数
+    前文已描述，就是完成各类适配器的注册。
+    Observe函数
+    调用各适配器提供的回调函数获取当前各模块的观测数据。
+    CreateTimer函数
+    创建一个定时器，在定时器内定时调用传入的回调函数。例如在Planning模块Planning::Start函数中，创建一个定时器来周期性地执行规划任务。
+
+	Status Planning::Start() {
+	  timer_ = AdapterManager::CreateTimer(
+	      ros::Duration(1.0 / FLAGS_planning_loop_rate), &Planning::OnTimer, this);
+	  ReferenceLineProvider::instance()->Start();
+	  AINFO << "Planning started";
+	  return Status::OK();
+	}
+
+其实是通过REGISTER_ADAPTER定义的宏，当增加一个新的IO时，通过该宏准备所有必要的适配器方法，
+举个例子，当你想在你的模块监听car_status消息时，你可以REGISTER_ADAPTER(CarStatus)，再写一个名为CarStatusAdapter的类，
+在AdapterManager中调用EnableCarStatus('car_status_topic', true, 'callback'(如果存在回调方法))即可。
+
+modules/common/adapters/adaper_manager.h中 Adaper处理的模块数据包括：
+	Topic消息在Adapter的流转
+
+	数据投放：
+
+		Apollo适配器需要在对应的模块中初始化，举例在Planning模块中，AdapaterManager的初始化需要拿Planning模块的适配器配置文件，去实例化Adapter。
+
+		CHECK(apollo::common::util::GetProtoFromFile(FLAGS_planning_config_file,
+				                             &config_))
+		    << "failed to load planning config file " << FLAGS_planning_config_file;
+		if (!AdapterManager::Initialized()) {
+		  AdapterManager::Init(FLAGS_planning_adapter_config_filename);
+		}
+
+		首先研究初始化传入的参数：FLAGS_planning_adapter_config_filename实际上是利用Google开源库gflags宏：定义的文件路径
+		planning-common--planning_gflags。cc 中有：：
+			DEFINE_string(planning_adapter_config_filename,
+              "modules/planning/conf/adapter.conf",
+              "The adapter configuration file");
+		
+		
+		以上FLAGS_planning_config_file配置文件内容即为：
+		modules/planning/config/adapter.config
+		
+		
+		
+		config {
+		  type: LOCALIZATION
+		  mode: RECEIVE_ONLY
+		  message_history_limit: 1
+		}
+		同时这个文件末尾还有一个 ：  is_ros: true  说明可以使用ros或其他的 底层平台
+		在AdapterManager::Init(const AdapterManagerConfig &configs) {
+			  if (Initialized()) {
+				return;
+			  }
+
+			  instance()->initialized_ = true;
+			  if (configs.is_ros()) {
+				instance()->node_handle_.reset(new ros::NodeHandle());
+			  }
+		可以看到 有调用ros平台的方式  
+		
+	与数据监听：
+	
+	
+	
+		modules/planning/planning.cc
+
+		// snapshot all coming data
+		  AdapterManager::Observe();
+
+	数据获取：
+
+
+		// 高精地图
+		hdmap_ = apollo::hdmap::HDMapUtil::BaseMapPtr();
+		// 感知信息
+		AdaperManager::GetPerception()
+
+		// 障碍物预测行为获取
+		AdapterManager::GetPrediction()
+
+		// 导航
+		AdapterManager::GetRoutingResponse() 
+
+		// localization
+		const auto& localization =
+		    AdapterManager::GetLocalization()->GetLatestObserved();
+		ADEBUG << "Get localization:" << localization.DebugString();
+
+		// chassis
+		const auto& chassis = AdapterManager::GetChassis()->GetLatestObserved();
+		ADEBUG << "Get chassis:" << chassis.DebugString();
+
+00000000000
+	Apollo项目在modules/common/adapters/adapter.h中定义了一个适配器模板类Adapter
+	里面的代码大多涉及消息格式转换，根本不必理会，我们最需关心的是这个回调函数添加函数：void AddCallback(Callback callback)，其中的Callback定义如下：
+
+		typedef typename std::function<void(const D&)> Callback;
+
+		说白了，这就是一个消息处理函数（或函数对象），该函数接收一个数据类型为D（模板参数）的参数，返回值为void。
+		当我们使用Adapter<D>::AddCallback函数将一个具体的消息处理函数（假定命名为message_handler)加入到Adapter<D>后，Adapter<D>就会经过一系列的内部操作，让message_handler顺利处理数据类型为D的消息。 
+	
+		基于Adapter模板，Apollo项目在modules/common/adapters/message_adapters.h文件中为我们预先定义了很多消息处理适配器，包括车辆底盘、定位、导航、感知、规划、控制、监控等多种消息：
+	
+	适配器管理器类AdapterManager对适配器的调用 
+		我们可以基于各个具体的Adapter实现消息的接收、发布，但仍然需要我们撰写代码少量与底层消息传递机制打交道的代码，显然不符合通用性要求。
+		Apollo的解决方案是定义一个适配器管理者对象AdapterManager，并在该类内部使用宏REGISTER_ADAPTER来添加各种消息适配器，同时实现对应消息的接收和发布功能，该宏的定义为：
+
+		#define REGISTER_ADAPTER(name) \
+
+		宏定义似乎有些难看，我们以RoutingRequest消息为例 ，来看一个实际例子。RoutingRequest消息的ProtoBuf格式如下：
+		REGISTER_ADAPTER(RoutingRequest)展开后的代码如下所示，
+		大家是不是看到了RoutingRequest消息响应回调函数的添加函数：static void AddRoutingRequestCallback(RoutingRequestAdapter::Callback callback)，
+		以及RoutingRequest消息发布函数：static void PublishRoutingRequest(const RoutingRequestAdapter::DataType &data)？
+
+	消息适配器及消息回调函数使用方法目前已基本将Apollo项目的消息适配器及消息回调函数阐述完毕，剩下的问题是如何使用？下面还是以RoutingRequest消息为例进行阐述。
+
+		1.初始化AdapterManager
+
+		在Routing类的初始化函数Routing::Init()中添加如下代码，完成AdapterManager的初始化：
+
+		AdapterManager::Init(FLAGS_routing_adapter_config_filename);
+
+		2.撰写RoutingRequest消息响应函数
+
+		在Routing类中撰写RoutingRequest消息响应函数：void Routing::OnRoutingRequest(
+		const RoutingRequest &routing_request)：
+
+		void Routing::OnRoutingRequest(
+		    const RoutingRequest &routing_request) {
+		  AINFO << "Get new routing request:" << routing_request.DebugString();
+		  RoutingResponse routing_response;
+		  apollo::common::monitor::MonitorLogBuffer buffer(&monitor_logger_);
+		  const auto& fixed_request = FillLaneInfoIfMissing(routing_request);
+		  if (!navigator_ptr_->SearchRoute(fixed_request, &routing_response)) {
+		    AERROR << "Failed to search route with navigator.";
+
+		    buffer.WARN("Routing failed! " + routing_response.status().msg());
+		    return;
+		  }
+		  buffer.INFO("Routing success!");
+		  AdapterManager::PublishRoutingResponse(routing_response);
+		  return;
+		}
+
+		3.将消息响应函数RoutingRequest注册到适配器管理器
+
+		在Routing类的初始化函数Routing::Init()中添加如下代码，完成消息响应函数RoutingRequest到适配器管理器的注册。注意适配器管理器AdapterManager中消息响应函数的注册函数名称格式为Add+MessageName+Callback，如下所示：
+
+		AdapterManager::AddRoutingRequestCallback(&Routing::OnRoutingRequest, this);
+
+		4.发布RoutingRequest消息
+
+		目前已经完成RoutingRequest消息的响应函数注册，但还没有消息发布函数。Apollo 2.0版本中，除测试模块外，另有两处发布该消息，一处是在dreamview模块，一处在planning模块。dreamview模块是在SimulationWorldUpdater类的构造函数内中调用AdapterManager::PublishRoutingRequest(routing_request)发布RoutingRequest消息：
+
+		SimulationWorldUpdater::SimulationWorldUpdater(WebSocketHandler *websocket, SimControl *sim_control, const MapService *map_service, bool routing_from_file)
+		    : sim_world_service_(map_service, routing_from_file),
+		      map_service_(map_service),
+		      websocket_(websocket),
+		      sim_control_(sim_control) {
+		 // ..
+		 websocket_->RegisterMessageHandler(
+		      "SendRoutingRequest",
+		      [this](const Json &json, WebSocketHandler::Connection *conn) {
+			RoutingRequest routing_request;
+
+			bool succeed = ConstructRoutingRequest(json, &routing_request);
+			if (succeed) {
+			  AdapterManager::FillRoutingRequestHeader(
+				FLAGS_dreamview_module_name, &routing_request);
+			  AdapterManager::PublishRoutingRequest(routing_request);
+			}
+		 // …
+
+		Planning模块是在Frame::Rerouting函数内调用AdapterManager::PublishRoutingRequest(request)发布RoutingRequest消息：
+
+		bool Frame::Rerouting() {
+		 // ...
+		  AdapterManager::PublishRoutingRequest(request);
+		  return true;
+		}
+
+	原文作者:davidhopper
+	原文地址:http://blog.csdn.net/davidhopper/article/details/79320467
+
+
+
+
+
+代办任务
+	1理解message_adapter.h中 using ChassisAdapter = Adapter<::apollo::canbus::Chassis>;  https://en.cppreference.com/w/cpp/language/type_alias  https://en.cppreference.com/w/cpp/keyword/using
+
+参考 
+	https://blog.csdn.net/zouyu1746430162/article/details/79695937
