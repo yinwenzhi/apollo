@@ -1,0 +1,27 @@
+这个网站介绍了rtk的原理
+https://www.novatel.com/an-introduction-to-gnss/chapter-5-resolving-errors/real-time-kinematic-rtk/
+
+vscode中查询rover有
+Apollo3.0 中/home/yin/Documents/Apollowork/apollo/modules/localization/proto/gnss_pnt_result.proto
+有//Define the position result of a rover, 
+
+/home/yin/Documents/Apollowork/apollo/modules/drivers/gnss/proto/gnss_raw_observation.proto中有
+//This message defines one satellite observation of a certain epochmessage SatelliteObservation
+vscode中查询gnss_pnt_result.proto有
+/home/yin/Documents/Apollowork/apollo/modules/localization/proto/BUILD
+
+/home/yin/Documents/Apollowork/apollo/modules/localization/msf/local_integ/localization_gnss_process.cc中有
+void LocalizationGnssProcess::RawObservationProcess(
+    const drivers::gnss::EpochObservation &raw_obs) {
+
+有
+// feed into GNSS-RTK Engine
+  double sec_s = sins_pva_msg.time;
+  double llh[3] = {sins_pva_msg.pos.longitude, sins_pva_msg.pos.latitude,
+                   sins_pva_msg.pos.height};
+  double velocity[3] = {sins_pva_msg.vel.ve, sins_pva_msg.vel.vn,
+
+
+/home/yin/Documents/Apollowork/apollo/modules/drivers/gnss/third_party/rtklib.h
+这个有rtklib这个库
+http://www.rtklib.com/
